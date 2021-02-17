@@ -14,7 +14,6 @@ def get_model():
     model.add(layers.Conv2D(64, (3, 3), activation='relu'))
     model.add(layers.Flatten())
     model.add(layers.Dense(64, activation='relu'))
-    model.add(tf.keras.layers.Dropout(0.1))
     model.add(layers.Dense(10))
     return model
 

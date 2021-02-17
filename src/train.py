@@ -5,22 +5,39 @@ import tensorflow as tf
 from tensorflow.keras import datasets, models, layers
 
 
-def get_model():
+def define_model():
     model = models.Sequential()
-    model.add(layers.Conv2D(32, (3, 3), activation='relu'))
+    model.add(layers.Conv2D(32, (3, 3), activation='relu', padding='same'))
+    model.add(layers.Conv2D(32, (3, 3), activation='relu', padding='same'))
     model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Conv2D(64, (3, 3), activation='relu'))
+    model.add(layers.Dropout(0.2))
+    model.add(layers.Conv2D(64, (3, 3), activation='relu', padding='same'))
+    model.add(layers.Conv2D(64, (3, 3), activation='relu', padding='same'))
     model.add(layers.MaxPooling2D((2, 2)))
-    model.add(layers.Conv2D(64, (3, 3), activation='relu'))
+    model.add(layers.Dropout(0.2))
+    model.add(layers.Conv2D(128, (3, 3), activation='relu', padding='same'))
+    model.add(layers.Conv2D(128, (3, 3), activation='relu', padding='same'))
+    model.add(layers.MaxPooling2D((2, 2)))
+    model.add(layers.Dropout(0.2))
     model.add(layers.Flatten())
-    model.add(layers.Dense(64, activation='relu'))
-    model.add(layers.Dense(10))
+    model.add(layers.Dense(128, activation='relu'))
+    model.add(layers.Dropout(0.2))
+    model.add(layers.Dense(10, activation='softmax'))
+
+    scaled_lr = 0.001 * hvd.size()
+    opt = tf.optimizers.Adam(scaled_lr)
+
+    opt = hvd.DistributedOptimizer(opt, backward_passes_per_step=1, average_aggregated_gradients=True)
+
+    model.compile(optimizer=opt,
+                  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                  metrics=['accuracy'],
+                  experimental_run_tf_function=False)
     return model
 
 
-def get_dataset(hvd_rank, hvd_size):
+def get_train_dataset(hvd_rank, hvd_size):
     (train_images, train_labels), _ = datasets.cifar10.load_data()
-
     ds_size = len(train_images)
 
     start = int(hvd_rank * (ds_size / hvd_size))
@@ -34,20 +51,17 @@ def get_dataset(hvd_rank, hvd_size):
     return dataset
 
 
+def get_test_dataset():
+    _, (test_images, test_labels) = datasets.cifar10.load_data()
+    return test_images / 255.0, test_labels
+
+
 def train(model, dataset, epochs, steps_per_epoch, hvd_rank=0, hvd_size=1):
     scaled_lr = 0.001 * hvd.size()
-    opt = tf.optimizers.Adam(scaled_lr)
-
-    opt = hvd.DistributedOptimizer(opt, backward_passes_per_step=1, average_aggregated_gradients=True)
-
-    model.compile(optimizer=opt,
-                  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-                  metrics=['accuracy'],
-                  experimental_run_tf_function=False)
     callbacks = [
         # Horovod: broadcast initial variable states from rank 0 to all other processes.
         # This is necessary to ensure consistent initialization of all workers when
-        # training is started with random weights or restored from a checkpoint.
+        # training is started with random weights or restore dfrom a checkpoint.
         hvd.callbacks.BroadcastGlobalVariablesCallback(0),
 
         # Horovod: average metrics among workers at the end of every epoch.
@@ -67,8 +81,9 @@ def train(model, dataset, epochs, steps_per_epoch, hvd_rank=0, hvd_size=1):
 
     # Horovod: write logs on worker 0.
     verbose = 1 if hvd_rank == 0 else 0
-
-    model.fit(dataset, epochs=epochs, steps_per_epoch=steps_per_epoch // hvd_size, callbacks=callbacks, verbose=verbose)
+    model.fit(dataset, epochs=epochs, steps_per_epoch=steps_per_epoch // hvd_size, callbacks=callbacks, verbose=verbose,
+              validation_data=get_test_dataset())
+    return model
 
 
 def parse_args():
@@ -81,15 +96,18 @@ def parse_args():
 
 
 def main(epochs, steps_per_epoch, hvd_rank=0, hvd_size=1):
-    model = get_model()
-    dataset = get_dataset(hvd_rank=hvd_rank, hvd_size=hvd_size)
-    train(model, dataset, epochs, steps_per_epoch, hvd_rank, hvd_size)
+    model = define_model()
+    dataset = get_train_dataset(hvd_rank=hvd_rank, hvd_size=hvd_size)
+    trained_model = train(model, dataset, epochs, steps_per_epoch, hvd_rank, hvd_size)
+    test_images, test_labels = get_test_dataset()
+    trained_model.evaluate(test_images, test_labels, verbose=1)
+    if hvd_rank == 0:
+        trained_model.save('result')
 
 
 if __name__ == '__main__':
     args = parse_args()
     hvd.init()
-    print(args.steps_per_epoch)
     main(
         epochs=args.epochs,
         steps_per_epoch=args.steps_per_epoch,

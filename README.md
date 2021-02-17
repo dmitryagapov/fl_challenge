@@ -38,7 +38,6 @@ docker build \
     --build-arg EPOCHS=5 \
     --build-arg STEPS_PER_EPOCH=3000 \
     --build-arg WORKERS=6 \
-    --build-arg WORKERS=6 \
     -t da/fl_challenge .
 ```
 

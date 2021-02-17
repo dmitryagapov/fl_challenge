@@ -3,25 +3,25 @@
 ### Clone repo
 
 ```
-git clone fl_comp
+git clone https://github.com/dmitryagapov/fl_challenge
 ```
 
 ### Go to repo's folder
 
 ```
-cd fl_comp
+cd fl_challenge
 ```
 
 ### Build image
 
 ```
-docker build -t da/fl_comp .
+docker build -t da/fl_challenge .
 ```
 
 ### Run container
 
 ```
-docker run da/fl_comp
+docker run da/fl_challenge
 ```
 
 ## Approach
